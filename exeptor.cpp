@@ -673,7 +673,8 @@ int posix_spawn(pid_t *__restrict pid, const char *__restrict path,
   } else {
     logprintf(logfile, "{intercept} -> not allowed to replace '%s'\n", path);
   }
-  return real_posix_spawn(pid, path, file_actions, attrp, argv, envp);
+  prep_common_envp(envs);
+  return real_posix_spawn(pid, path, file_actions, attrp, argv, const_cast<char *const *>(envs.data()));
 }
 
 int posix_spawnp(pid_t *__restrict pid, const char *__restrict file,
@@ -725,7 +726,8 @@ int posix_spawnp(pid_t *__restrict pid, const char *__restrict file,
   } else {
     logprintf(logfile, "{intercept} -> not allowed to replace '%s'\n", file);
   }
-  return real_posix_spawnp(pid, file, file_actions, attrp, argv, envp);
+  prep_common_envp(envs);
+  return real_posix_spawnp(pid, file, file_actions, attrp, argv, const_cast<char *const *>(envs.data()));
 }
 
 } // extern "C"
