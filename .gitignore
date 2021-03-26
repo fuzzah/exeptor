@@ -1,0 +1,7 @@
+# cmake build results
+build/
+.cache/
+
+*.log
+
+.vscode/

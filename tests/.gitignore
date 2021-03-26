@@ -1,0 +1,3 @@
+# build results of test projects
+cmake/bld/
+make/make-target

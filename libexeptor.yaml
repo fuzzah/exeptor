@@ -1,0 +1,28 @@
+target_groups:
+    compilers:
+        del-options:
+            - -Werror
+            - -s
+        add-options:
+            - -Wno-error
+            - -Wno-unknown-pragmas
+            - -Wno-unused-value
+            - -g
+        replacements:
+            gcc: afl-clang-fast
+            /usr/bin/gcc: /usr/local/bin/afl-clang-fast
+            g++: afl-clang-fast++
+            /usr/bin/gcc++: /usr/local/bin/afl-clang-fast++
+            clang: afl-clang-fast
+            /usr/bin/clang: /usr/local/bin/afl-clang-fast
+            clang++: afl-clang-fast++
+            /usr/bin/clang++: /usr/local/bin/afl-clang-fast++
+    tools:
+        # del-options:
+        # add-options:
+        replacements:
+            gcc-ranlib: llvm-ranlib
+            /usr/bin/gcc-ranlib: /usr/bin/llvm-ranlib
+            gcc-ar: llvm-ar
+            /usr/bin/gcc-ar: /usr/bin/llvm-ar
+
