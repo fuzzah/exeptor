@@ -13,7 +13,7 @@ target_groups:
             gcc: afl-clang-fast
             /usr/bin/gcc: /usr/local/bin/afl-clang-fast
             g++: afl-clang-fast++
-            /usr/bin/gcc++: /usr/local/bin/afl-clang-fast++
+            /usr/bin/g++: /usr/local/bin/afl-clang-fast++
             clang: afl-clang-fast
             /usr/bin/clang: /usr/local/bin/afl-clang-fast
             clang++: afl-clang-fast++
