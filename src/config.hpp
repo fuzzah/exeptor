@@ -1,3 +1,15 @@
+/*
+
+file    :  src/config.hpp
+repo    :  https://github.com/fuzzah/exeptor
+author  :  https://github.com/fuzzah
+license :  MIT
+check repository for more information
+
+parse replacement settings from yaml config file with help of yaml-cpp library
+
+*/
+
 #pragma once
 
 #include <iostream>
