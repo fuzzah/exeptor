@@ -8,6 +8,7 @@ target_groups:
             - -Wno-unknown-pragmas
             - -Wno-unused-value
             - -g
+            - -fno-omit-frame-pointer
         replacements:
             gcc: afl-clang-fast
             /usr/bin/gcc: /usr/local/bin/afl-clang-fast
