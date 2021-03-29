@@ -304,14 +304,14 @@ int _posix_spawn(pid_t *__restrict pid, const char *__restrict path,
     logprintf("{intercept} -> replacement for '%s' is not blocked\n", path);
     auto t = g_settings.programs.find(path);
     if (t != g_settings.programs.end()) {
-      logprintf("[INTERCEPT] %s( /* pid = */ %p, \"%s\", ... ); ", funcname,
-                pid, path);
-
       auto args = vec_from_argv_envp(argv);
+
       std::string prog = path;
       prep_prog_argv_env(prog, args, envs);
 
-      logprintf(" // replaced with '%s' \n", prog.c_str());
+      logprintf("[INTERCEPT] %s( /* pid = */ %p, \"%s\", ... ); // replaced "
+                "with '%s' \n",
+                funcname, pid, path, prog.c_str());
       logflush();
 
       return posix_spawn_func(pid, prog.c_str(), file_actions, attrp,
@@ -338,14 +338,20 @@ int _execv(const char *pathname, char *const argv[], const char *funcname,
     auto t = g_settings.programs.find(pathname);
     if (t != g_settings.programs.end()) {
       auto args = vec_from_argv_envp(argv);
+
       std::string prog = pathname;
       prep_prog_argv(prog, args);
+
       logprintf("[INTERCEPT] %s(\"%s\", ...); // replaced with '%s' \n",
                 funcname, pathname, prog.c_str());
       logflush();
       execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
       FATAL("%s interception failed", funcname);
+    } else {
+      logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
+  } else {
+    logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
   prep_common_environ();
   execv_func(pathname, argv);
@@ -374,7 +380,11 @@ int _execve(const char *pathname, char *const argv[], char *const envp[],
       execve_func(prog.c_str(), const_cast<char *const *>(args.data()),
                   const_cast<char *const *>(envs.data()));
       FATAL("%s interception failed", funcname);
+    } else {
+      logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
+  } else {
+    logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
   prep_common_envp(envs);
   execve_func(pathname, argv, const_cast<char *const *>(envs.data()));
@@ -399,7 +409,11 @@ int _execl(const char *pathname, std::vector<const char *> args,
 
       execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
       FATAL("%s interception failed", origfuncname);
+    } else {
+      logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
+  } else {
+    logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
   args.push_back(nullptr);
   prep_common_environ();
@@ -494,7 +508,6 @@ int execle(const char *pathname, const char *arg,
   if (g_intercept_allowed) {
     auto t = g_settings.programs.find(pathname);
     if (t != g_settings.programs.end()) {
-
       std::string prog = pathname;
       prep_prog_argv_env(prog, args, envs);
 
@@ -505,7 +518,11 @@ int execle(const char *pathname, const char *arg,
       real_execve(prog.c_str(), const_cast<char *const *>(args.data()),
                   const_cast<char *const *>(envs.data()));
       FATAL("execle interception failed");
+    } else {
+      logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
+  } else {
+    logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
   args.push_back(nullptr);
   prep_common_envp(envs);
