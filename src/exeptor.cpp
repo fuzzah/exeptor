@@ -262,6 +262,20 @@ std::vector<const char *> vec_from_argv_envp(const char *const *argv) {
   return ret;
 }
 
+// return vector from va_list initialized with va_start.
+// this function doesn't call va_end
+std::vector<const char *> vec_from_va_list(va_list args, const char *arg) {
+  std::vector<const char *> ret;
+
+  const char *parg = arg;
+  while (parg != nullptr) {
+    ret.push_back(parg);
+    parg = va_arg(args, const char *);
+  }
+
+  return ret;
+}
+
 // for posix_spawn & posix_spawnp
 int _posix_spawn(pid_t *__restrict pid, const char *__restrict path,
                  const posix_spawn_file_actions_t *__restrict file_actions,
@@ -361,6 +375,33 @@ int _execve(const char *pathname, char *const argv[], char *const envp[],
   FATAL("%s interception failed", funcname);
 }
 
+// for execl & execlp
+int _execl(const char *pathname, std::vector<const char *> args,
+           const char *origfuncname, execv_t execv_func) {
+  initlib();
+  logprintf("{intercept} app is calling %s('%s')\n", origfuncname, pathname);
+  logflush();
+
+  if (g_intercept_allowed) {
+    auto t = g_settings.programs.find(pathname);
+    if (t != g_settings.programs.end()) {
+      std::string prog = pathname;
+      prep_prog_argv(prog, args);
+
+      logprintf("[INTERCEPT] execl(\"%s\", ...); // replaced with '%s' \n",
+                pathname, prog.c_str());
+      logflush();
+
+      execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
+      FATAL("%s interception failed", origfuncname);
+    }
+  }
+  args.push_back(nullptr);
+  prep_common_environ();
+  execv_func(pathname, const_cast<char *const *>(args.data()));
+  FATAL("%s interception failed", origfuncname);
+}
+
 extern "C" {
 
 int posix_spawn(pid_t *__restrict pid, const char *__restrict path,
@@ -396,82 +437,29 @@ int execve(const char *pathname, char *const argv[], char *const envp[]) {
   return _execve(pathname, argv, envp, "execve", real_execve);
 }
 
+// call to execl gets converted to execv
 int execl(const char *pathname, const char *arg, ...) {
-  // execl -> execv
-  initlib();
-  logprintf("{intercept} app is calling execl('%s')\n", pathname);
-  logflush();
-
-  std::vector<const char *> args;
   va_list vl;
   va_start(vl, arg);
-  const char *parg = arg;
-  while (parg != nullptr) {
-    args.push_back(parg);
-    parg = va_arg(vl, const char *);
-  }
+  auto args = vec_from_va_list(vl, arg);
   va_end(vl);
 
-  if (g_intercept_allowed) {
-    auto t = g_settings.programs.find(pathname);
-    if (t != g_settings.programs.end()) {
-      std::string prog = pathname;
-      prep_prog_argv(prog, args);
-
-      logprintf("[INTERCEPT] execl(\"%s\", ...); // replaced with '%s' \n",
-                pathname, prog.c_str());
-      logflush();
-
-      real_execv(prog.c_str(), const_cast<char *const *>(args.data()));
-      FATAL("execl interception failed");
-    }
-  }
-  args.push_back(nullptr);
-  prep_common_environ();
-  real_execv(pathname, const_cast<char *const *>(args.data()));
-  FATAL("execl interception failed");
+  return _execl(pathname, args, "execl", real_execv);
 }
 
+// call to execlp gets converted to execvp
 int execlp(const char *file, const char *arg, ...) {
-  // execlp -> execvp
-  initlib();
-  logprintf("{intercept} app is calling execlp('%s')\n", file);
-  logflush();
-
-  std::vector<const char *> args;
   va_list vl;
   va_start(vl, arg);
-  const char *parg = arg;
-  while (parg != nullptr) {
-    args.push_back(parg);
-    parg = va_arg(vl, const char *);
-  }
+  auto args = vec_from_va_list(vl, arg);
   va_end(vl);
 
-  if (g_intercept_allowed) {
-    auto t = g_settings.programs.find(file);
-    if (t != g_settings.programs.end()) {
-
-      std::string prog = file;
-      prep_prog_argv(prog, args);
-
-      logprintf("[INTERCEPT] execlp(\"%s\", ...); // replaced with '%s' \n",
-                file, prog.c_str());
-      logflush();
-
-      real_execvp(prog.c_str(), const_cast<char *const *>(args.data()));
-      FATAL("execlp interception failed");
-    }
-  }
-  args.push_back(nullptr);
-  prep_common_environ();
-  real_execvp(file, const_cast<char *const *>(args.data()));
-  FATAL("execlp interception failed");
+  return _execl(file, args, "execlp", real_execvp);
 }
 
+// call to execle gets converted to execve
 int execle(const char *pathname, const char *arg,
            ... /*, (char *) NULL, char *const envp[] */) {
-  // execle -> execve
   initlib();
   logprintf("{intercept} app is calling execle('%s')\n", pathname);
   logflush();
