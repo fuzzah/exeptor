@@ -46,6 +46,15 @@ FILE *logfile = nullptr;
   fflush(logfile)
 #endif
 
+#define FATAL(...)                                                             \
+  do {                                                                         \
+    logprintf("FATAL error in %s at %s:%u\nMessage: ", __func__, __FILE__,     \
+              __LINE__);                                                       \
+    logprintf(__VA_ARGS__);                                                    \
+    logflush();                                                                \
+    _exit(7);                                                                  \
+  } while (false)
+
 typedef int (*execv_t)(const char *pathname, char *const argv[]);
 execv_t real_execv = nullptr;
 
@@ -76,13 +85,12 @@ typedef int (*posix_spawnp_t)(
 
 posix_spawnp_t real_posix_spawnp = nullptr;
 
-ReplacementSettings settings;
-
-bool intercept_allowed = true;
-bool exeptor_initialized = false;
+ReplacementSettings g_settings;
+bool g_intercept_allowed = true;
 char cmdline[4096]; // cmdline of host application
 
 void initlib() {
+  static bool exeptor_initialized = false;
   if (exeptor_initialized)
     return;
 
@@ -102,7 +110,7 @@ void initlib() {
     config_path = default_config_path;
   }
 
-  if (!settings.parse_from_file(config_path)) {
+  if (!g_settings.parse_from_file(config_path)) {
     std::cerr << "ERROR: failed to parse config file" << std::endl;
     exit(2);
   }
@@ -133,9 +141,9 @@ void initlib() {
   logprintf("libexeptor: loaded to '%s'\n", cmdline);
   logflush();
 
-  for (const auto &it : settings.programs) {
+  for (const auto &it : g_settings.programs) {
     if (it.second == cmdline) {
-      intercept_allowed = false;
+      g_intercept_allowed = false;
       break; // prevent recursive calls from tools that have already
              // been replaced
     }
@@ -146,32 +154,6 @@ void initlib() {
 
 // static void __attribute__((constructor)) libmain() { initlib(); }
 
-void prep_prog_argv(std::string &prog, std::vector<const char *> &args) {
-  auto t = settings.programs.find(prog);
-  if (t != settings.programs.end()) {
-    auto &del_opts = settings.del_options[prog];
-    auto &add_opts = settings.add_options[prog];
-    if (args.size() > 0) {
-      args[0] = t->second.c_str();
-    }
-    if (args.size() > 1 && !del_opts.empty()) {
-      // don't replace argv[0]
-      for (auto it = args.begin() + 1; it != args.end();) {
-        if (del_opts.find(*it) != del_opts.end()) {
-          it = args.erase(it);
-        } else {
-          it++;
-        }
-      }
-    }
-    for (auto &opt : add_opts) {
-      args.push_back(opt.c_str());
-    }
-    prog = t->second.c_str();
-  }
-  args.push_back(nullptr); // insert NULL in any case (for execvXX functions)
-}
-
 #define num_exeptor_vars 4
 char exeptor_envs[num_exeptor_vars][PATH_MAX + 20] = {
     "EXEPTOR_VERBOSE", "EXEPTOR_CONFIG", "EXEPTOR_LOG", "LD_PRELOAD"};
@@ -180,9 +162,11 @@ char exeptor_envs[num_exeptor_vars][PATH_MAX + 20] = {
 void prep_common_environ() {
   for (size_t i = 0; i < num_exeptor_vars; i++) {
     char *p = getenv(exeptor_envs[i]);
+
     if (!p) {
       continue;
     }
+
     setenv(exeptor_envs[i], p, 1);
   }
 }
@@ -191,9 +175,11 @@ void prep_common_environ() {
 void prep_common_envp(std::vector<const char *> &envs) {
   for (size_t i = 0; i < num_exeptor_vars; i++) {
     char *p = getenv(exeptor_envs[i]);
+
     if (!p) {
       continue;
     }
+
     // it's ok to change global vars because this code executes only once before
     // exec-call
     snprintf(exeptor_envs[i] + strlen(exeptor_envs[i]),
@@ -215,20 +201,200 @@ void prep_common_envp(std::vector<const char *> &envs) {
   envs.push_back(nullptr); // insert NULL in any case (for execXXe functions)
 }
 
+void prep_prog_argv(std::string &prog, std::vector<const char *> &args) {
+  auto t = g_settings.programs.find(prog);
+  if (t != g_settings.programs.end()) {
+    auto &del_opts = g_settings.del_options[prog];
+    auto &add_opts = g_settings.add_options[prog];
+
+    if (args.size() > 0) {
+      args[0] = t->second.c_str();
+    }
+
+    if (args.size() > 1 && !del_opts.empty()) {
+      // don't replace argv[0]
+      for (auto it = args.begin() + 1; it != args.end();) {
+        if (del_opts.find(*it) != del_opts.end()) {
+          it = args.erase(it);
+        } else {
+          it++;
+        }
+      }
+    }
+
+    for (auto &opt : add_opts) {
+      args.push_back(opt.c_str());
+    }
+
+    prog = t->second.c_str();
+  }
+
+  args.push_back(nullptr); // insert NULL in any case (for execvXX functions)
+
+  prep_common_environ();
+}
+
 void prep_prog_argv_env(std::string &prog, std::vector<const char *> &args,
                         std::vector<const char *> &envs) {
   prep_prog_argv(prog, args);
 
   // TODO: add-environ, del-environ
   /*
-  auto t = settings.programs.find(prog);
-  if (t != settings.programs.end()) {
+  auto t = g_settings.programs.find(prog);
+  if (t != g_settings.programs.end()) {
   }
   */
   prep_common_envp(envs);
 }
 
+// return vector from NULL-terminated argv or envp list
+std::vector<const char *> vec_from_argv_envp(const char *const *argv) {
+  std::vector<const char *> ret;
+
+  if (argv) {
+    size_t i = 0;
+    while (argv[i]) {
+      ret.push_back(argv[i]);
+      i++;
+    }
+  }
+
+  return ret;
+}
+
+// for posix_spawn & posix_spawnp
+int _posix_spawn(pid_t *__restrict pid, const char *__restrict path,
+                 const posix_spawn_file_actions_t *__restrict file_actions,
+                 const posix_spawnattr_t *__restrict attrp,
+                 char *const *__restrict argv, char *const *__restrict envp,
+                 const char *funcname, posix_spawn_t posix_spawn_func) {
+  initlib();
+  logprintf("{intercept} app is calling '%s'('%s')\n", funcname, path);
+  logflush();
+
+  auto envs = vec_from_argv_envp(envp);
+
+  if (g_intercept_allowed) {
+    logprintf("{intercept} -> replacement for '%s' is not blocked\n", path);
+    auto t = g_settings.programs.find(path);
+    if (t != g_settings.programs.end()) {
+      logprintf("[INTERCEPT] %s( /* pid = */ %p, \"%s\", ... ); ", funcname,
+                pid, path);
+
+      auto args = vec_from_argv_envp(argv);
+      std::string prog = path;
+      prep_prog_argv_env(prog, args, envs);
+
+      logprintf(" // replaced with '%s' \n", prog.c_str());
+      logflush();
+
+      return posix_spawn_func(pid, prog.c_str(), file_actions, attrp,
+                              const_cast<char *const *>(args.data()),
+                              const_cast<char *const *>(envs.data()));
+    } else {
+      logprintf("{intercept} -> no replacement found for '%s'\n", path);
+    }
+  } else {
+    logprintf("{intercept} -> not allowed to replace '%s'\n", path);
+  }
+  prep_common_envp(envs);
+  return posix_spawn_func(pid, path, file_actions, attrp, argv,
+                          const_cast<char *const *>(envs.data()));
+}
+
+// for execv & execvp
+int _execv(const char *pathname, char *const argv[], const char *funcname,
+           execv_t execv_func) {
+  initlib();
+  logprintf("{intercept} app is calling %s('%s')\n", funcname, pathname);
+  logflush();
+
+  if (g_intercept_allowed) {
+    auto t = g_settings.programs.find(pathname);
+    if (t != g_settings.programs.end()) {
+      auto args = vec_from_argv_envp(argv);
+
+      std::string prog = pathname;
+      prep_prog_argv(prog, args);
+
+      logprintf("[INTERCEPT] %s(\"%s\", ...); // replaced with '%s' \n",
+                funcname, pathname, prog.c_str());
+      logflush();
+
+      execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
+      FATAL("%s interception failed", funcname);
+    }
+  }
+  prep_common_environ();
+  execv_func(pathname, argv);
+  FATAL("%s interception failed", funcname);
+}
+
+// for execve & execvpe
+int _execve(const char *pathname, char *const argv[], char *const envp[],
+            const char *funcname, execve_t execve_func) {
+  initlib();
+  logprintf("{intercept} app is calling %s('%s')\n", funcname, pathname);
+  logflush();
+
+  auto envs = vec_from_argv_envp(envp);
+
+  if (g_intercept_allowed) {
+    auto t = g_settings.programs.find(pathname);
+    if (t != g_settings.programs.end()) {
+      auto args = vec_from_argv_envp(envp);
+
+      std::string prog = pathname;
+      prep_prog_argv_env(prog, args, envs);
+
+      logprintf("[INTERCEPT] %s(\"%s\", ...); // replaced with '%s' \n",
+                funcname, pathname, prog.c_str());
+      logflush();
+
+      execve_func(prog.c_str(), const_cast<char *const *>(args.data()),
+                  const_cast<char *const *>(envs.data()));
+      FATAL("%s interception failed", funcname);
+    }
+  }
+  prep_common_envp(envs);
+  execve_func(pathname, argv, const_cast<char *const *>(envs.data()));
+  FATAL("%s interception failed", funcname);
+}
+
 extern "C" {
+
+int posix_spawn(pid_t *__restrict pid, const char *__restrict path,
+                const posix_spawn_file_actions_t *__restrict file_actions,
+                const posix_spawnattr_t *__restrict attrp,
+                char *const *__restrict argv, char *const *__restrict envp) {
+
+  return _posix_spawn(pid, path, file_actions, attrp, argv, envp, "posix_spawn",
+                      real_posix_spawn);
+}
+
+int posix_spawnp(pid_t *__restrict pid, const char *__restrict file,
+                 const posix_spawn_file_actions_t *__restrict file_actions,
+                 const posix_spawnattr_t *__restrict attrp,
+                 char *const *__restrict argv, char *const *__restrict envp) {
+  return _posix_spawn(pid, file, file_actions, attrp, argv, envp,
+                      "posix_spawnp", real_posix_spawnp);
+}
+
+int execv(const char *pathname, char *const argv[]) {
+  return _execv(pathname, argv, "execv", real_execv);
+}
+
+int execvp(const char *pathname, char *const argv[]) {
+  return _execv(pathname, argv, "execvp", real_execvp);
+}
+
+int execvpe(const char *file, char *const argv[], char *const envp[]) {
+  return _execve(file, argv, envp, "execvpe", real_execvpe);
+}
+
+int execve(const char *pathname, char *const argv[], char *const envp[]) {
+  return _execve(pathname, argv, envp, "execve", real_execve);
+}
 
 int execl(const char *pathname, const char *arg, ...) {
   // execl -> execv
@@ -246,34 +412,24 @@ int execl(const char *pathname, const char *arg, ...) {
   }
   va_end(vl);
 
-  if (intercept_allowed) {
-    auto t = settings.programs.find(pathname);
-    if (t != settings.programs.end()) {
-      logprintf("[INTERCEPT] execl(\"%s\"", pathname);
-
-      for (const auto &parg : args) {
-        logprintf(", \"%s\"", parg);
-      }
-
+  if (g_intercept_allowed) {
+    auto t = g_settings.programs.find(pathname);
+    if (t != g_settings.programs.end()) {
       std::string prog = pathname;
       prep_prog_argv(prog, args);
-      prep_common_environ();
 
-      logprintf(" // replaced with '%s' \n", prog.c_str());
+      logprintf("[INTERCEPT] execl(\"%s\", ...); // replaced with '%s' \n",
+                pathname, prog.c_str());
       logflush();
 
       real_execv(prog.c_str(), const_cast<char *const *>(args.data()));
-      logprintf("[FATAL] Last call failed\n");
-      logflush();
-      _exit(7);
+      FATAL("execl interception failed");
     }
   }
   args.push_back(nullptr);
   prep_common_environ();
   real_execv(pathname, const_cast<char *const *>(args.data()));
-  logprintf("[FATAL] Last call failed\n");
-  logflush();
-  _exit(7);
+  FATAL("execl interception failed");
 }
 
 int execlp(const char *file, const char *arg, ...) {
@@ -292,34 +448,25 @@ int execlp(const char *file, const char *arg, ...) {
   }
   va_end(vl);
 
-  if (intercept_allowed) {
-    auto t = settings.programs.find(file);
-    if (t != settings.programs.end()) {
-      logprintf("[INTERCEPT] execlp(\"%s\"", file);
-
-      for (const auto &parg : args) {
-        logprintf(", \"%s\"", parg);
-      }
+  if (g_intercept_allowed) {
+    auto t = g_settings.programs.find(file);
+    if (t != g_settings.programs.end()) {
 
       std::string prog = file;
       prep_prog_argv(prog, args);
-      prep_common_environ();
 
-      logprintf(" // replaced with '%s' \n", prog.c_str());
+      logprintf("[INTERCEPT] execlp(\"%s\", ...); // replaced with '%s' \n",
+                file, prog.c_str());
       logflush();
 
       real_execvp(prog.c_str(), const_cast<char *const *>(args.data()));
-      logprintf("[FATAL] Last call failed\n");
-      logflush();
-      _exit(7);
+      FATAL("execlp interception failed");
     }
   }
   args.push_back(nullptr);
   prep_common_environ();
   real_execvp(file, const_cast<char *const *>(args.data()));
-  logprintf("[FATAL] Last call failed\n");
-  logflush();
-  _exit(7);
+  FATAL("execlp interception failed");
 }
 
 int execle(const char *pathname, const char *arg,
@@ -340,361 +487,29 @@ int execle(const char *pathname, const char *arg,
   char *const *envp = va_arg(vl, char *const *);
   va_end(vl);
 
-  std::vector<const char *> envs;
-  if (envp) {
-    size_t i = 0;
-    while (envp[i]) {
-      envs.push_back(envp[i]);
-      i++;
-    }
-  }
+  auto envs = vec_from_argv_envp(envp);
 
-  if (intercept_allowed) {
-    auto t = settings.programs.find(pathname);
-    if (t != settings.programs.end()) {
-      logprintf("[INTERCEPT] execle(\"%s\"", pathname);
-
-      for (const auto &parg : args) {
-        logprintf(", \"%s\"", parg);
-      }
-
-      if (envp) {
-        logprintf(", NULL, /* envp: {");
-        size_t i = 0;
-        while (envp[i]) {
-          logprintf("'%s' ", envp[i]);
-          i++;
-        }
-        logprintf("} */ %p);", envp);
-      } else {
-        logprintf(", NULL, /* envp = */ NULL);");
-      }
+  if (g_intercept_allowed) {
+    auto t = g_settings.programs.find(pathname);
+    if (t != g_settings.programs.end()) {
 
       std::string prog = pathname;
       prep_prog_argv_env(prog, args, envs);
-      logprintf(" // replaced with '%s' \n", prog.c_str());
+
+      logprintf("[INTERCEPT] execle(\"%s\", ...); // replaced with '%s' \n",
+                pathname, prog.c_str());
       logflush();
 
       real_execve(prog.c_str(), const_cast<char *const *>(args.data()),
                   const_cast<char *const *>(envs.data()));
-      logprintf("[FATAL] Last call failed\n");
-      logflush();
-      _exit(7);
+      FATAL("execle interception failed");
     }
   }
   args.push_back(nullptr);
   prep_common_envp(envs);
   real_execve(pathname, const_cast<char *const *>(args.data()),
               const_cast<char *const *>(envs.data()));
-  logprintf("[FATAL] Last call failed\n");
-  logflush();
-  _exit(7);
-}
-
-int execv(const char *pathname, char *const argv[]) {
-  initlib();
-  logprintf("{intercept} app is calling execv('%s')\n", pathname);
-  logflush();
-
-  if (intercept_allowed) {
-    auto t = settings.programs.find(pathname);
-    if (t != settings.programs.end()) {
-      std::vector<const char *> args;
-
-      logprintf("[INTERCEPT] execv(\"%s\", /* argv: {", pathname);
-
-      size_t i = 0;
-      while (argv[i]) {
-        logprintf("'%s' ", argv[i]);
-        args.push_back(argv[i]);
-        i++;
-      }
-
-      std::string prog = pathname;
-      prep_prog_argv(prog, args);
-      prep_common_environ();
-
-      logprintf("} */ %p); // replaced with '%s' \n", argv, prog.c_str());
-      logflush();
-
-      real_execv(prog.c_str(), const_cast<char *const *>(args.data()));
-      logprintf("[FATAL] Last call failed\n");
-      logflush();
-      _exit(7);
-    }
-  }
-  prep_common_environ();
-  real_execv(pathname, argv);
-  logprintf("[FATAL] Last call failed\n");
-  logflush();
-  _exit(7);
-}
-
-int execvp(const char *pathname, char *const argv[]) {
-  initlib();
-  logprintf("{intercept} app is calling execvp('%s')\n", pathname);
-  logflush();
-
-  if (intercept_allowed) {
-    auto t = settings.programs.find(pathname);
-    if (t != settings.programs.end()) {
-      std::vector<const char *> args;
-
-      logprintf("[INTERCEPT] execvp(\"%s\", /* argv: {", pathname);
-
-      size_t i = 0;
-      while (argv[i]) {
-        logprintf("'%s' ", argv[i]);
-        args.push_back(argv[i]);
-        i++;
-      }
-
-      std::string prog = pathname;
-      prep_prog_argv(prog, args);
-      prep_common_environ();
-
-      logprintf("} */ %p); // replaced with '%s' \n", argv, prog.c_str());
-      logflush();
-
-      real_execvp(prog.c_str(), const_cast<char *const *>(args.data()));
-      logprintf("[FATAL] Last call failed\n");
-      logflush();
-      _exit(7);
-    }
-  }
-  prep_common_environ();
-  real_execvp(pathname, argv);
-  logprintf("[FATAL] Last call failed\n");
-  logflush();
-  _exit(7);
-}
-
-int execvpe(const char *file, char *const argv[], char *const envp[]) {
-  initlib();
-  logprintf("{intercept} app is calling execvpe('%s')\n", file);
-  logflush();
-
-  std::vector<const char *> envs;
-  if (envp) {
-    size_t i = 0;
-    while (envp[i]) {
-      envs.push_back(envp[i]);
-      i++;
-    }
-  }
-
-  if (intercept_allowed) {
-    auto t = settings.programs.find(file);
-    if (t != settings.programs.end()) {
-      std::vector<const char *> args;
-
-      logprintf("[INTERCEPT] execvpe(\"%s\", /* argv: {", file);
-
-      size_t i = 0;
-      while (argv[i]) {
-        logprintf("'%s' ", argv[i]);
-        args.push_back(argv[i]);
-        i++;
-      }
-
-      if (envp) {
-        logprintf("} */ %p,  /* envp: {", argv);
-        i = 0;
-        while (envp[i]) {
-          logprintf("'%s' ", envp[i]);
-          i++;
-        }
-        logprintf("} */ %p);", envp);
-      } else {
-        logprintf("} */ NULL);");
-      }
-
-      std::string prog = file;
-      prep_prog_argv_env(prog, args, envs);
-      logprintf(" // replaced with '%s' \n", prog.c_str());
-      logflush();
-
-      real_execvpe(prog.c_str(), const_cast<char *const *>(args.data()),
-                   const_cast<char *const *>(envs.data()));
-      logprintf("[FATAL] Last call failed\n");
-      logflush();
-      _exit(7);
-    }
-  }
-  prep_common_envp(envs);
-  real_execvpe(file, argv, const_cast<char *const *>(envs.data()));
-  logprintf("[FATAL] Last call failed\n");
-  logflush();
-  _exit(7);
-}
-
-int execve(const char *pathname, char *const argv[], char *const envp[]) {
-  initlib();
-  logprintf("{intercept} app is calling execve('%s')\n", pathname);
-  logflush();
-
-  std::vector<const char *> envs;
-  if (envp) {
-    size_t i = 0;
-    while (envp[i]) {
-      envs.push_back(envp[i]);
-      i++;
-    }
-  }
-
-  if (intercept_allowed) {
-    logprintf("{intercept} -> replacement for '%s' is not blocked\n", pathname);
-    auto t = settings.programs.find(pathname);
-    if (t != settings.programs.end()) {
-      std::vector<const char *> args;
-
-      logprintf("[INTERCEPT] execve(\"%s\", /* argv: {", pathname);
-
-      size_t i = 0;
-      while (argv[i]) {
-        logprintf("'%s' ", argv[i]);
-        args.push_back(argv[i]);
-        i++;
-      }
-
-      if (envp) {
-        logprintf("} */ %p,  /* envp: {", argv);
-        i = 0;
-        while (envp[i]) {
-          logprintf("'%s' ", envp[i]);
-          i++;
-        }
-        logprintf("} */ %p);", envp);
-      } else {
-        logprintf("} */ NULL);");
-      }
-
-      std::string prog = pathname;
-      prep_prog_argv_env(prog, args, envs);
-      logprintf(" // replaced with '%s' \n", prog.c_str());
-      logflush();
-
-      real_execve(prog.c_str(), const_cast<char *const *>(args.data()),
-                  const_cast<char *const *>(envs.data()));
-      logprintf("[FATAL] Last call failed\n");
-      logflush();
-      _exit(7);
-    } else {
-      logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
-    }
-  } else {
-    logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
-  }
-
-  prep_common_envp(envs);
-  logflush();
-  real_execve(pathname, argv, const_cast<char *const *>(envs.data()));
-  logprintf("[FATAL] Last call failed\n");
-  logflush();
-  _exit(7);
-}
-
-int posix_spawn(pid_t *__restrict pid, const char *__restrict path,
-                const posix_spawn_file_actions_t *__restrict file_actions,
-                const posix_spawnattr_t *__restrict attrp,
-                char *const *__restrict argv, char *const *__restrict envp) {
-
-  initlib();
-  logprintf("{intercept} app is calling posix_spawn('%s')\n", path);
-  logflush();
-
-  std::vector<const char *> envs;
-  if (envp) {
-    size_t i = 0;
-    while (envp[i]) {
-      envs.push_back(envp[i]);
-      i++;
-    }
-  }
-
-  if (intercept_allowed) {
-    logprintf("{intercept} -> replacement for '%s' is not blocked\n", path);
-    auto t = settings.programs.find(path);
-    if (t != settings.programs.end()) {
-      std::vector<const char *> args;
-      logprintf("[INTERCEPT] posix_spawn( /* pid = */ %p, \"%s\", ... ); ", pid,
-                path);
-
-      size_t i = 0;
-      while (argv[i]) {
-        // logprintf("'%s' ", argv[i]);
-        args.push_back(argv[i]);
-        i++;
-      }
-
-      std::string prog = path;
-      prep_prog_argv_env(prog, args, envs);
-      logprintf(" // replaced with '%s' \n", prog.c_str());
-      logflush();
-
-      return real_posix_spawn(pid, prog.c_str(), file_actions, attrp,
-                              const_cast<char *const *>(args.data()),
-                              const_cast<char *const *>(envs.data()));
-    } else {
-      logprintf("{intercept} -> no replacement found for '%s'\n", path);
-    }
-  } else {
-    logprintf("{intercept} -> not allowed to replace '%s'\n", path);
-  }
-  prep_common_envp(envs);
-  return real_posix_spawn(pid, path, file_actions, attrp, argv,
-                          const_cast<char *const *>(envs.data()));
-}
-
-int posix_spawnp(pid_t *__restrict pid, const char *__restrict file,
-                 const posix_spawn_file_actions_t *__restrict file_actions,
-                 const posix_spawnattr_t *__restrict attrp,
-                 char *const *__restrict argv, char *const *__restrict envp) {
-  initlib();
-  logprintf("{intercept} app is calling posix_spawnp('%s')\n", file);
-  logflush();
-
-  std::vector<const char *> envs;
-  if (envp) {
-    size_t i = 0;
-    while (envp[i]) {
-      envs.push_back(envp[i]);
-      i++;
-    }
-  }
-
-  if (intercept_allowed) {
-    logprintf("{intercept} -> replacement for '%s' is not blocked\n", file);
-    auto t = settings.programs.find(file);
-    if (t != settings.programs.end()) {
-      std::vector<const char *> args;
-      logprintf("[INTERCEPT] posix_spawnp( /* pid = */ %p, \"%s\", ... ); ",
-                pid, file);
-
-      size_t i = 0;
-      while (argv[i]) {
-        // logprintf("'%s' ", argv[i]);
-        args.push_back(argv[i]);
-        i++;
-      }
-
-      std::string prog = file;
-      prep_prog_argv_env(prog, args, envs);
-      logprintf(" // replaced with '%s' \n", prog.c_str());
-      logflush();
-
-      return real_posix_spawnp(pid, prog.c_str(), file_actions, attrp,
-                               const_cast<char *const *>(args.data()),
-                               const_cast<char *const *>(envs.data()));
-    } else {
-      logprintf("{intercept} -> no replacement found for '%s'\n", file);
-    }
-  } else {
-    logprintf("{intercept} -> not allowed to replace '%s'\n", file);
-  }
-  prep_common_envp(envs);
-  return real_posix_spawnp(pid, file, file_actions, attrp, argv,
-                           const_cast<char *const *>(envs.data()));
+  FATAL("execle interception failed");
 }
 
 } // extern "C"
