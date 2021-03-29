@@ -51,9 +51,22 @@ FILE *logfile = nullptr;
     logprintf("FATAL error in %s at %s:%u\nMessage: ", __func__, __FILE__,     \
               __LINE__);                                                       \
     logprintf(__VA_ARGS__);                                                    \
+    logprintf("\n");                                                           \
     logflush();                                                                \
     _exit(7);                                                                  \
   } while (false)
+
+#ifndef NDEBUG
+#define DEBUG(...)                                                             \
+  do {                                                                         \
+    logprintf("DEBUG: %s at %s:%u. Message: ", __func__, __FILE__, __LINE__);  \
+    logprintf(__VA_ARGS__);                                                    \
+    logprintf("\n");                                                           \
+    logflush();                                                                \
+  } while (false)
+#else
+#define DEBUG(...)
+#endif
 
 typedef int (*execv_t)(const char *pathname, char *const argv[]);
 execv_t real_execv = nullptr;
@@ -282,7 +295,6 @@ int _posix_spawn(pid_t *__restrict pid, const char *__restrict path,
                  const posix_spawnattr_t *__restrict attrp,
                  char *const *__restrict argv, char *const *__restrict envp,
                  const char *funcname, posix_spawn_t posix_spawn_func) {
-  initlib();
   logprintf("{intercept} app is calling '%s'('%s')\n", funcname, path);
   logflush();
 
@@ -319,7 +331,6 @@ int _posix_spawn(pid_t *__restrict pid, const char *__restrict path,
 // for execv & execvp
 int _execv(const char *pathname, char *const argv[], const char *funcname,
            execv_t execv_func) {
-  initlib();
   logprintf("{intercept} app is calling %s('%s')\n", funcname, pathname);
   logflush();
 
@@ -327,14 +338,11 @@ int _execv(const char *pathname, char *const argv[], const char *funcname,
     auto t = g_settings.programs.find(pathname);
     if (t != g_settings.programs.end()) {
       auto args = vec_from_argv_envp(argv);
-
       std::string prog = pathname;
       prep_prog_argv(prog, args);
-
       logprintf("[INTERCEPT] %s(\"%s\", ...); // replaced with '%s' \n",
                 funcname, pathname, prog.c_str());
       logflush();
-
       execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
       FATAL("%s interception failed", funcname);
     }
@@ -347,10 +355,8 @@ int _execv(const char *pathname, char *const argv[], const char *funcname,
 // for execve & execvpe
 int _execve(const char *pathname, char *const argv[], char *const envp[],
             const char *funcname, execve_t execve_func) {
-  initlib();
   logprintf("{intercept} app is calling %s('%s')\n", funcname, pathname);
   logflush();
-
   auto envs = vec_from_argv_envp(envp);
 
   if (g_intercept_allowed) {
@@ -378,7 +384,6 @@ int _execve(const char *pathname, char *const argv[], char *const envp[],
 // for execl & execlp
 int _execl(const char *pathname, std::vector<const char *> args,
            const char *origfuncname, execv_t execv_func) {
-  initlib();
   logprintf("{intercept} app is calling %s('%s')\n", origfuncname, pathname);
   logflush();
 
@@ -408,7 +413,7 @@ int posix_spawn(pid_t *__restrict pid, const char *__restrict path,
                 const posix_spawn_file_actions_t *__restrict file_actions,
                 const posix_spawnattr_t *__restrict attrp,
                 char *const *__restrict argv, char *const *__restrict envp) {
-
+  initlib();
   return _posix_spawn(pid, path, file_actions, attrp, argv, envp, "posix_spawn",
                       real_posix_spawn);
 }
@@ -417,28 +422,35 @@ int posix_spawnp(pid_t *__restrict pid, const char *__restrict file,
                  const posix_spawn_file_actions_t *__restrict file_actions,
                  const posix_spawnattr_t *__restrict attrp,
                  char *const *__restrict argv, char *const *__restrict envp) {
+  initlib();
   return _posix_spawn(pid, file, file_actions, attrp, argv, envp,
                       "posix_spawnp", real_posix_spawnp);
 }
 
 int execv(const char *pathname, char *const argv[]) {
+  initlib();
   return _execv(pathname, argv, "execv", real_execv);
 }
 
 int execvp(const char *pathname, char *const argv[]) {
+  initlib();
   return _execv(pathname, argv, "execvp", real_execvp);
 }
 
 int execvpe(const char *file, char *const argv[], char *const envp[]) {
+  initlib();
   return _execve(file, argv, envp, "execvpe", real_execvpe);
 }
 
 int execve(const char *pathname, char *const argv[], char *const envp[]) {
+  initlib();
   return _execve(pathname, argv, envp, "execve", real_execve);
 }
 
 // call to execl gets converted to execv
 int execl(const char *pathname, const char *arg, ...) {
+  initlib();
+
   va_list vl;
   va_start(vl, arg);
   auto args = vec_from_va_list(vl, arg);
@@ -449,6 +461,8 @@ int execl(const char *pathname, const char *arg, ...) {
 
 // call to execlp gets converted to execvp
 int execlp(const char *file, const char *arg, ...) {
+  initlib();
+
   va_list vl;
   va_start(vl, arg);
   auto args = vec_from_va_list(vl, arg);
