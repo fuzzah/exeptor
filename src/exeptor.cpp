@@ -217,8 +217,8 @@ void prep_common_envp(std::vector<const char *> &envs) {
 void prep_prog_argv(std::string &prog, std::vector<const char *> &args) {
   auto t = g_settings.programs.find(prog);
   if (t != g_settings.programs.end()) {
-    auto &del_opts = g_settings.del_options[prog];
-    auto &add_opts = g_settings.add_options[prog];
+    auto &del_opts = g_settings.del_options[prog]; // [] may create vector here..
+    auto &add_opts = g_settings.add_options[prog]; // ..and here, but it's ok
 
     if (args.size() > 0) {
       args[0] = t->second.c_str();

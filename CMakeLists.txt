@@ -22,3 +22,4 @@ target_link_libraries(exeptor PRIVATE dl PRIVATE yaml-cpp)
 
 set_property(TARGET exeptor PROPERTY POSITION_INDEPENDENT_CODE ON)
 
+add_subdirectory(test)
