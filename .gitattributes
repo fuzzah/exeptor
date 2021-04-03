@@ -1,0 +1,2 @@
+# don't count lines of code in Catch2 test framework
+test/catch.hpp -linguist-detectable
