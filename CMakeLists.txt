@@ -5,7 +5,7 @@ set(CMAKE_BUILD_TYPE Debug)
 
 set(CMAKE_CXX_STANDARD 11)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-format-truncation -O2")
 
 add_subdirectory(external/yaml-cpp yaml-cpp)
 set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)

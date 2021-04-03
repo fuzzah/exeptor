@@ -171,21 +171,10 @@ void initlib() {
 char exeptor_envs[num_exeptor_vars][PATH_MAX + 20] = {
     "EXEPTOR_VERBOSE", "EXEPTOR_CONFIG", "EXEPTOR_LOG", "LD_PRELOAD"};
 
-// for use with exec-calls not ending with 'e'
-void prep_common_environ() {
-  for (size_t i = 0; i < num_exeptor_vars; i++) {
-    char *p = getenv(exeptor_envs[i]);
-
-    if (!p) {
-      continue;
-    }
-
-    setenv(exeptor_envs[i], p, 1);
-  }
-}
-
-// for use with exec-calls ending with 'e'
+// for use with exec-calls that accept envp argument
 void prep_common_envp(std::vector<const char *> &envs) {
+  static char envs_tmp[num_exeptor_vars][sizeof(exeptor_envs[0])];
+
   for (size_t i = 0; i < num_exeptor_vars; i++) {
     char *p = getenv(exeptor_envs[i]);
 
@@ -193,14 +182,10 @@ void prep_common_envp(std::vector<const char *> &envs) {
       continue;
     }
 
-    // it's ok to change global vars because this code executes only once before
-    // exec-call
-    snprintf(exeptor_envs[i] + strlen(exeptor_envs[i]),
-             sizeof(exeptor_envs[i]) - strlen(exeptor_envs[i]), "=%s", p);
-
-    envs.push_back(exeptor_envs[i]);
-    setenv(exeptor_envs[i], p, 1);
+    snprintf(envs_tmp[i], sizeof(envs_tmp[i]), "%s=%s", exeptor_envs[i], p);
+    envs.push_back(envs_tmp[i]);
   }
+  
   auto szorder = [](const char *left, const char *right) {
     return strcmp(left, right) < 0;
   };
@@ -243,8 +228,6 @@ void prep_prog_argv(std::string &prog, std::vector<const char *> &args) {
   }
 
   args.push_back(nullptr); // insert NULL in any case (for execvXX functions)
-
-  prep_common_environ();
 }
 
 void prep_prog_argv_env(std::string &prog, std::vector<const char *> &args,
@@ -353,7 +336,6 @@ int _execv(const char *pathname, char *const argv[], const char *funcname,
   } else {
     logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
-  prep_common_environ();
   execv_func(pathname, argv);
   FATAL("%s interception failed", funcname);
 }
@@ -416,7 +398,6 @@ int _execl(const char *pathname, std::vector<const char *> args,
     logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
   args.push_back(nullptr);
-  prep_common_environ();
   execv_func(pathname, const_cast<char *const *>(args.data()));
   FATAL("%s interception failed", origfuncname);
 }
