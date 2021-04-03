@@ -7,3 +7,9 @@ build/
 .vscode/
 
 core.*
+
+# coverage collection files
+profraw/
+*.profraw
+*.gcno
+*.gcda
