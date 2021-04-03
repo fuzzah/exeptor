@@ -278,7 +278,7 @@ int _posix_spawn(pid_t *__restrict pid, const char *__restrict path,
                  const posix_spawnattr_t *__restrict attrp,
                  char *const *__restrict argv, char *const *__restrict envp,
                  const char *funcname, posix_spawn_t posix_spawn_func) {
-  logprintf("{intercept} app is calling '%s'('%s')\n", funcname, path);
+  logprintf("{intercept} app is calling %s('%s')\n", funcname, path);
   logflush();
 
   auto envs = vec_from_argv_envp(envp);
@@ -350,8 +350,7 @@ int _execve(const char *pathname, char *const argv[], char *const envp[],
   if (g_intercept_allowed) {
     auto t = g_settings.programs.find(pathname);
     if (t != g_settings.programs.end()) {
-      auto args = vec_from_argv_envp(envp);
-
+      auto args = vec_from_argv_envp(argv);
       std::string prog = pathname;
       prep_prog_argv_env(prog, args, envs);
 
