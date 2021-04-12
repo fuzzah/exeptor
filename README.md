@@ -4,13 +4,13 @@ Your savior library is here to help you fight back against poorly designed build
 How it works: LD_PRELOAD libexeptor to your build-starting command. The library will then intercept all calls to exec functions (execve, execl, posix_spawn, etc) and replace paths according to yaml configuration file. <br>
 
 ## Requirements
-CMake and compiler with C++11 support to build. <br>
+CMake>=3.4 and compiler with C++11 support to build. <br>
 **Linux-based distro**. Other OS are currently not supported. <br>
 
 ## Build
-Clone this repo and use CMake to build. Don't forget `--recurse-submodules` as libexeptor relies on the awesome [yaml-cpp](https://github.com/jbeder/yaml-cpp) library to parse configuration file:
+Clone this repo and use CMake to build. Don't forget `--recursive` as libexeptor relies on the awesome [yaml-cpp](https://github.com/jbeder/yaml-cpp) library to parse configuration file:
 ```bash
-git clone https://github.com/fuzzah/exeptor --recurse-submodules
+git clone https://github.com/fuzzah/exeptor --recursive
 cd exeptor/
 mkdir build && cd build
 cmake ..
@@ -69,6 +69,22 @@ Here "compilers" and "tools" are just names of groups, they can be anything. In 
 Note that binaries that replace original binaries never get their exec calls intercepted in order to prevent infinite recursion. In this case AFL++ compilers can start gcc/clang without any problems. <br>
 <br>
 You are advised to create separate config files to perform different builds for different tasks: fuzzing, sanitizing, coverage collection. Fuzzing can also be split by compilers in use: afl-clang-fast++, hfuzz-clang++ and so on.
+
+## FAQ
+Q: **Is there really any need for such a tool?** <br>
+A: You won't even believe... Not until you see some real build systems used in real production with your own eyes. Some developers may not change their build systems for years (!) because they "just work". When facing with such devs and their systems you SHOULD NOT waste your time finding all the places where compilers and flags are hardcoded, *just use libexeptor instead*. <br>
+
+Q: **My configure command failed: "clang is not able to compile a simple test program". What to do?** <br>
+A: Probably you have changed gcc to clang (or something like gcc4->gcc10) and the new compiler doesn't understand some command line arguments passed by **configure**. Try exporting CFLAGS or CXXFLAGS with a value **-Qunused-arguments**. <br>
+
+Q: **All the tools in my build system are linked dynamically but exeptor doesn't work! How do I receive help?** <br>
+A: Please create an issue describing your build system: OS and tools with versions. If you have a working solution please send a PR (for nonstandard things Dockerfiles are most welcome). <br>
+
+Q: **Can I use it for something other than fuzzing?** <br>
+A: Yes, because libexeptor was designed to be 'general purpose': its intended use is to replace original binaries with some similar binaries, e.g. python->python3.8, grep->rg, wget->curl, etc. <br>
+
+Q: **Why call it 'exeptor'?** <br>
+A: Well.. exeptor is basically an **exe**c() call interc**eptor**. It could have had some other silly name like execeptor or something completely different, but what would that change? :P <br>
 
 ## Troubleshooting
 Make sure that all binaries in build system are linked dinamically.<br>
