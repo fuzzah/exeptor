@@ -185,7 +185,7 @@ void prep_common_envp(std::vector<const char *> &envs) {
     snprintf(envs_tmp[i], sizeof(envs_tmp[i]), "%s=%s", exeptor_envs[i], p);
     envs.push_back(envs_tmp[i]);
   }
-  
+
   auto szorder = [](const char *left, const char *right) {
     return strcmp(left, right) < 0;
   };
@@ -328,16 +328,14 @@ int _execv(const char *pathname, char *const argv[], const char *funcname,
       logprintf("[INTERCEPT] %s(\"%s\", ...); // replaced with '%s' \n",
                 funcname, pathname, prog.c_str());
       logflush();
-      execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
-      FATAL("%s interception failed", funcname);
+      return execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
     } else {
       logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
   } else {
     logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
-  execv_func(pathname, argv);
-  FATAL("%s interception failed", funcname);
+  return execv_func(pathname, argv);
 }
 
 // for execve & execvpe
@@ -358,9 +356,8 @@ int _execve(const char *pathname, char *const argv[], char *const envp[],
                 funcname, pathname, prog.c_str());
       logflush();
 
-      execve_func(prog.c_str(), const_cast<char *const *>(args.data()),
+      return execve_func(prog.c_str(), const_cast<char *const *>(args.data()),
                   const_cast<char *const *>(envs.data()));
-      FATAL("%s interception failed", funcname);
     } else {
       logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
@@ -368,8 +365,7 @@ int _execve(const char *pathname, char *const argv[], char *const envp[],
     logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
   prep_common_envp(envs);
-  execve_func(pathname, argv, const_cast<char *const *>(envs.data()));
-  FATAL("%s interception failed", funcname);
+  return execve_func(pathname, argv, const_cast<char *const *>(envs.data()));
 }
 
 // for execl & execlp
@@ -388,8 +384,7 @@ int _execl(const char *pathname, std::vector<const char *> args,
                 pathname, prog.c_str());
       logflush();
 
-      execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
-      FATAL("%s interception failed", origfuncname);
+      return execv_func(prog.c_str(), const_cast<char *const *>(args.data()));
     } else {
       logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
@@ -397,8 +392,7 @@ int _execl(const char *pathname, std::vector<const char *> args,
     logprintf("{intercept} -> not allowed to replace '%s'\n", pathname);
   }
   args.push_back(nullptr);
-  execv_func(pathname, const_cast<char *const *>(args.data()));
-  FATAL("%s interception failed", origfuncname);
+  return execv_func(pathname, const_cast<char *const *>(args.data()));
 }
 
 extern "C" {
@@ -495,9 +489,8 @@ int execle(const char *pathname, const char *arg,
                 pathname, prog.c_str());
       logflush();
 
-      real_execve(prog.c_str(), const_cast<char *const *>(args.data()),
+      return real_execve(prog.c_str(), const_cast<char *const *>(args.data()),
                   const_cast<char *const *>(envs.data()));
-      FATAL("execle interception failed");
     } else {
       logprintf("{intercept} -> no replacement found for '%s'\n", pathname);
     }
@@ -506,9 +499,8 @@ int execle(const char *pathname, const char *arg,
   }
   args.push_back(nullptr);
   prep_common_envp(envs);
-  real_execve(pathname, const_cast<char *const *>(args.data()),
+  return real_execve(pathname, const_cast<char *const *>(args.data()),
               const_cast<char *const *>(envs.data()));
-  FATAL("execle interception failed");
 }
 
 } // extern "C"
