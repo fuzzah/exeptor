@@ -1,6 +1,6 @@
 # exeptor
 libexeptor - helper tool for making fuzzer-instrumented builds. <br>
-Your savior library is here to help you fight back against poorly designed build systems that ignore environment variables and instead use hardcoded compilers defined in billions of sed-processed Makefiles, junky SRPM specs, unruly CMake external projects, etc. <br>
+Your savior library is here to help you fight back against poorly designed build systems that ignore environment variables and instead use hardcoded compilers defined in billions of sed-processed Makefiles, janky SRPM specs, unruly CMake external projects, etc. <br>
 How it works: LD_PRELOAD libexeptor to your build-starting command. The library will then intercept all calls to exec functions (execve, execl, posix_spawn, etc) and replace paths according to yaml configuration file. <br>
 
 ## Requirements
@@ -75,7 +75,7 @@ Q: **Is there really any need for such a tool?** <br>
 A: You won't even believe... Not until you see some real build systems used in real production with your own eyes. Some developers may not change their build systems for years (!) because they "just work". When facing with such devs and their systems you SHOULD NOT waste your time finding all the places where compilers and flags are hardcoded, *just use libexeptor instead*. <br>
 
 Q: **My configure command failed: "clang is not able to compile a simple test program". What to do?** <br>
-A: Probably you have changed gcc to clang (or something like gcc4->gcc10) and the new compiler doesn't understand some command line arguments passed by **configure**. Try exporting CFLAGS or CXXFLAGS with a value **-Qunused-arguments**. <br>
+A: Probably you have changed gcc to clang (or something like gcc4->gcc10) and the new compiler doesn't understand some command line arguments passed by **configure**. Try exporting CFLAGS or CXXFLAGS with value **-Qunused-arguments**. <br>
 
 Q: **All the tools in my build system are linked dynamically but exeptor doesn't work! How do I receive help?** <br>
 A: Please create an issue describing your build system: OS and tools with versions. If you have a working solution please send a PR (for nonstandard things Dockerfiles are most welcome). <br>
@@ -87,7 +87,7 @@ Q: **Why call it 'exeptor'?** <br>
 A: Well.. exeptor is basically an **exe**c() call interc**eptor**. It could have had some other silly name like execeptor or something completely different, but what would that change? :P <br>
 
 ## Troubleshooting
-Make sure that all binaries in build system are linked dinamically.<br>
+Make sure that all binaries in build system are linked dynamically.<br>
 What could help you finding problem: run strace like that (without libexeptor.so in LD_PRELOAD):
 ```bash
 strace -ff -v -s 200 -e process ./build_make_target.sh 2>&1 | egrep "exec\S+\s*\(" | cut -f2 -d\" | sort | uniq | xargs file {} | grep ELF | grep -v "dynamically linked"
